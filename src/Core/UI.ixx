@@ -62,6 +62,11 @@ namespace NK {
   {
       auto ui = RE::UI::GetSingleton();
       return ui && ui->IsMenuOpen(menuName);
-  }  
+  }
+    
+  export auto UINotify(const std::string notify) -> void
+  {
+    RE::SendHUDMessage::ShowHUDMessage(notify.data());
+  }
 
 }

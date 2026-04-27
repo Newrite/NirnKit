@@ -7,17 +7,155 @@ export module NirnKit.STLExtension;
 
 namespace NK {
     
+    // New types
+    export struct Error
+    {
+        std::string message;
+    };
+
+    export template <class T>
+    using Result = std::expected<T, Error>;
+
+    export using VoidResult = std::expected<void, Error>;
+    
+    
+    export template <class F>
+    class ScopeExit
+    {
+    public:
+        template <class Fn>
+            requires std::constructible_from<F, Fn>
+        explicit ScopeExit(Fn&& fn)
+            noexcept(std::is_nothrow_constructible_v<F, Fn>)
+            : fn_(std::forward<Fn>(fn))
+        {
+        }
+
+        ScopeExit(ScopeExit&& other)
+            noexcept(std::is_nothrow_move_constructible_v<F>)
+            : fn_(std::move(other.fn_)),
+              active_(std::exchange(other.active_, false))
+        {
+        }
+
+        ScopeExit(const ScopeExit&) = delete;
+        auto operator=(const ScopeExit&) -> ScopeExit& = delete;
+        auto operator=(ScopeExit&&) -> ScopeExit& = delete;
+
+        ~ScopeExit() noexcept
+        {
+            if (active_)
+                fn_();
+        }
+
+        auto Release() noexcept -> void
+        {
+            active_ = false;
+        }
+
+    private:
+        F fn_;
+        bool active_ = true;
+    };
+
+    template <class F>
+    ScopeExit(F) -> ScopeExit<F>;
+    
+    
+    // Overloaded for std::visit
+    export template <class... Ts>
+    struct Overloaded : Ts...
+    {
+        using Ts::operator()...;
+    };
+
+    template <class... Ts>
+    Overloaded(Ts...) -> Overloaded<Ts...>;
+    
+    
+    export namespace Internal
+    {
+        [[nodiscard]]
+        constexpr auto IsAsciiSpace(char c) noexcept -> bool
+        {
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+        }
+        
+        [[nodiscard]]
+        constexpr auto StripHexPrefix(std::string_view s) noexcept -> std::string_view
+        {
+            if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+                s.remove_prefix(2);
+
+            return s;
+        }
+
+        [[nodiscard]]
+        constexpr auto TrimAsciiView(std::string_view s) noexcept -> std::string_view
+        {
+            while (!s.empty() && IsAsciiSpace(s.front()))
+                s.remove_prefix(1);
+
+            while (!s.empty() && IsAsciiSpace(s.back()))
+                s.remove_suffix(1);
+
+            return s;
+        }
+
+        [[nodiscard]]
+        constexpr auto ToLowerAscii(char c) noexcept -> char
+        {
+            if (c >= 'A' && c <= 'Z')
+                return static_cast<char>(c - 'A' + 'a');
+
+            return c;
+        }
+
+        [[nodiscard]]
+        constexpr auto IEqualsAscii(std::string_view a, std::string_view b) noexcept -> bool
+        {
+            if (a.size() != b.size())
+                return false;
+
+            for (size_t i = 0; i < a.size(); ++i) {
+                if (ToLowerAscii(a[i]) != ToLowerAscii(b[i]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [[nodiscard]]
+        inline auto MakeParseError(std::string_view function,
+                                   std::string_view input,
+                                   std::string_view reason) -> Error
+        {
+            std::string message;
+            message += function;
+            message += ": ";
+            message += reason;
+            message += " [input: `";
+            message += input;
+            message += "`]";
+
+            return Error{std::move(message)};
+        }
+
+        template <class T>
+        [[nodiscard]]
+        auto ParseFailure(std::string_view function,
+                          std::string_view input,
+                          std::string_view reason) -> Result<T>
+        {
+            return std::unexpected(MakeParseError(function, input, reason));
+        }
+    }
+    
+    
     // String helpers
     export auto Trim(std::string_view str) -> std::string
     {
-        constexpr std::string_view whitespace = " \t\r\n";
-
-        const auto start = str.find_first_not_of(whitespace);
-        if (start == std::string_view::npos)
-            return {};
-
-        const auto end = str.find_last_not_of(whitespace);
-        return std::string{str.substr(start, end - start + 1)};
+        return std::string{Internal::TrimAsciiView(str)};
     }
 
     export auto Split(std::string_view str, char delimiter) -> std::vector<std::string>
@@ -99,7 +237,7 @@ namespace NK {
     
     
     // STL containers helpers
-    template <std::ranges::input_range R>
+    export template <std::ranges::input_range R>
     [[nodiscard]]
     auto ToVector(R&& range)
     {
@@ -109,7 +247,7 @@ namespace NK {
             | std::ranges::to<std::vector<T>>();
     }
 
-    template <class T, std::ranges::input_range R>
+    export template <class T, std::ranges::input_range R>
     [[nodiscard]]
     auto ToVector(R&& range) -> std::vector<T>
     {
@@ -426,73 +564,6 @@ namespace NK {
     }
     
     
-    
-    // New types
-    struct Error
-    {
-        std::string message;
-    };
-
-    export template <class T>
-    using Result = std::expected<T, Error>;
-
-    export using VoidResult = std::expected<void, Error>;
-    
-    
-    export template <class F>
-    class ScopeExit
-    {
-    public:
-        template <class Fn>
-            requires std::constructible_from<F, Fn>
-        explicit ScopeExit(Fn&& fn)
-            noexcept(std::is_nothrow_constructible_v<F, Fn>)
-            : fn_(std::forward<Fn>(fn))
-        {
-        }
-
-        ScopeExit(ScopeExit&& other)
-            noexcept(std::is_nothrow_move_constructible_v<F>)
-            : fn_(std::move(other.fn_)),
-              active_(std::exchange(other.active_, false))
-        {
-        }
-
-        ScopeExit(const ScopeExit&) = delete;
-        auto operator=(const ScopeExit&) -> ScopeExit& = delete;
-        auto operator=(ScopeExit&&) -> ScopeExit& = delete;
-
-        ~ScopeExit() noexcept
-        {
-            if (active_)
-                fn_();
-        }
-
-        auto Release() noexcept -> void
-        {
-            active_ = false;
-        }
-
-    private:
-        F fn_;
-        bool active_ = true;
-    };
-
-    template <class F>
-    ScopeExit(F) -> ScopeExit<F>;
-    
-    
-    // Overloaded for std::visit
-    export template <class... Ts>
-    struct Overloaded : Ts...
-    {
-        using Ts::operator()...;
-    };
-
-    template <class... Ts>
-    Overloaded(Ts...) -> Overloaded<Ts...>;
-    
-    
     // opt in bitmask for enum classes
     /*
     enum class ActorFlags : uint32_t
@@ -550,75 +621,6 @@ namespace NK {
     {
         return ToBigEndian(value);
     }
-    
-    namespace detail
-    {
-        [[nodiscard]]
-        constexpr auto IsAsciiSpace(char c) noexcept -> bool
-        {
-            return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-        }
-
-        [[nodiscard]]
-        constexpr auto TrimAsciiView(std::string_view s) noexcept -> std::string_view
-        {
-            while (!s.empty() && IsAsciiSpace(s.front()))
-                s.remove_prefix(1);
-
-            while (!s.empty() && IsAsciiSpace(s.back()))
-                s.remove_suffix(1);
-
-            return s;
-        }
-
-        [[nodiscard]]
-        constexpr auto ToLowerAscii(char c) noexcept -> char
-        {
-            if (c >= 'A' && c <= 'Z')
-                return static_cast<char>(c - 'A' + 'a');
-
-            return c;
-        }
-
-        [[nodiscard]]
-        constexpr auto IEqualsAscii(std::string_view a, std::string_view b) noexcept -> bool
-        {
-            if (a.size() != b.size())
-                return false;
-
-            for (size_t i = 0; i < a.size(); ++i) {
-                if (ToLowerAscii(a[i]) != ToLowerAscii(b[i]))
-                    return false;
-            }
-
-            return true;
-        }
-
-        [[nodiscard]]
-        inline auto MakeParseError(std::string_view function,
-                                   std::string_view input,
-                                   std::string_view reason) -> Error
-        {
-            std::string message;
-            message += function;
-            message += ": ";
-            message += reason;
-            message += " [input: `";
-            message += input;
-            message += "`]";
-
-            return Error{std::move(message)};
-        }
-
-        template <class T>
-        [[nodiscard]]
-        auto ParseFailure(std::string_view function,
-                          std::string_view input,
-                          std::string_view reason) -> Result<T>
-        {
-            return std::unexpected(MakeParseError(function, input, reason));
-        }
-    }
 
     export template <class T>
     concept ParseInteger =
@@ -630,13 +632,13 @@ namespace NK {
     auto ParseIntegral(std::string_view input, int base = 10) -> Result<T>
     {
         const auto original = input;
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
-            return detail::ParseFailure<T>("ParseIntegral", original, "empty input");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "empty input");
 
         if (base < 2 || base > 36)
-            return detail::ParseFailure<T>("ParseIntegral", original, "base must be in [2, 36]");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "base must be in [2, 36]");
 
         T value{};
 
@@ -646,16 +648,16 @@ namespace NK {
         const auto [ptr, ec] = std::from_chars(first, last, value, base);
 
         if (ec == std::errc::invalid_argument)
-            return detail::ParseFailure<T>("ParseIntegral", original, "not an integer");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "not an integer");
 
         if (ec == std::errc::result_out_of_range)
-            return detail::ParseFailure<T>("ParseIntegral", original, "integer out of range");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "integer out of range");
 
         if (ec != std::errc{})
-            return detail::ParseFailure<T>("ParseIntegral", original, "integer parse failed");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "integer parse failed");
 
         if (ptr != last)
-            return detail::ParseFailure<T>("ParseIntegral", original, "trailing characters");
+            return Internal::ParseFailure<T>("ParseIntegral", original, "trailing characters");
 
         return value;
     }
@@ -680,10 +682,10 @@ namespace NK {
                        std::chars_format format = std::chars_format::general) -> Result<T>
     {
         const auto original = input;
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
-            return detail::ParseFailure<T>("ParseFloating", original, "empty input");
+            return Internal::ParseFailure<T>("ParseFloating", original, "empty input");
 
         T value{};
 
@@ -693,16 +695,16 @@ namespace NK {
         const auto [ptr, ec] = std::from_chars(first, last, value, format);
 
         if (ec == std::errc::invalid_argument)
-            return detail::ParseFailure<T>("ParseFloating", original, "not a floating-point number");
+            return Internal::ParseFailure<T>("ParseFloating", original, "not a floating-point number");
 
         if (ec == std::errc::result_out_of_range)
-            return detail::ParseFailure<T>("ParseFloating", original, "floating-point value out of range");
+            return Internal::ParseFailure<T>("ParseFloating", original, "floating-point value out of range");
 
         if (ec != std::errc{})
-            return detail::ParseFailure<T>("ParseFloating", original, "floating-point parse failed");
+            return Internal::ParseFailure<T>("ParseFloating", original, "floating-point parse failed");
 
         if (ptr != last)
-            return detail::ParseFailure<T>("ParseFloating", original, "trailing characters");
+            return Internal::ParseFailure<T>("ParseFloating", original, "trailing characters");
 
         return value;
     }
@@ -736,6 +738,65 @@ namespace NK {
             return ParseFloating<T>(input);
         }
     }
+    
+    export template <ParseInteger T>
+    [[nodiscard]]
+    auto ParseHex(std::string_view input) -> Result<T>
+    {
+        const auto original = input;
+
+        input = Internal::TrimAsciiView(input);
+
+        if constexpr (std::signed_integral<T>) {
+            bool negative = false;
+
+            if (!input.empty() && input.front() == '-') {
+                negative = true;
+                input.remove_prefix(1);
+            }
+
+            input = Internal::StripHexPrefix(input);
+
+            if (input.empty())
+                return Internal::ParseFailure<T>("ParseHex", original, "empty hex value");
+
+            if (negative) {
+                std::string normalized;
+                normalized.reserve(input.size() + 1);
+                normalized += '-';
+                normalized += input;
+
+                return ParseIntegral<T>(normalized, 16);
+            }
+
+            return ParseIntegral<T>(input, 16);
+        } else {
+            if (!input.empty() && input.front() == '-')
+                return Internal::ParseFailure<T>("ParseHex", original, "negative value for unsigned integer");
+
+            if (!input.empty() && input.front() == '+')
+                input.remove_prefix(1);
+
+            input = Internal::StripHexPrefix(input);
+
+            if (input.empty())
+                return Internal::ParseFailure<T>("ParseHex", original, "empty hex value");
+
+            return ParseIntegral<T>(input, 16);
+        }
+    }
+
+    export [[nodiscard]]
+    inline auto HexToInt64(std::string_view input) -> Result<int64_t>
+    {
+        return ParseHex<int64_t>(input);
+    }
+
+    export [[nodiscard]]
+    inline auto HexToUInt32(std::string_view input) -> Result<uint32_t>
+    {
+        return ParseHex<uint32_t>(input);
+    }
 
     export enum class BoolParseMode
     {
@@ -748,33 +809,33 @@ namespace NK {
                           BoolParseMode mode = BoolParseMode::Relaxed) -> Result<bool>
     {
         const auto original = input;
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
-            return detail::ParseFailure<bool>("ParseBool", original, "empty input");
+            return Internal::ParseFailure<bool>("ParseBool", original, "empty input");
 
-        if (detail::IEqualsAscii(input, "true"))
+        if (Internal::IEqualsAscii(input, "true"))
             return true;
 
-        if (detail::IEqualsAscii(input, "false"))
+        if (Internal::IEqualsAscii(input, "false"))
             return false;
 
         if (mode == BoolParseMode::Strict)
-            return detail::ParseFailure<bool>("ParseBool", original, "expected `true` or `false`");
+            return Internal::ParseFailure<bool>("ParseBool", original, "expected `true` or `false`");
 
         if (input == "1" ||
-            detail::IEqualsAscii(input, "yes") ||
-            detail::IEqualsAscii(input, "on") ||
-            detail::IEqualsAscii(input, "enabled"))
+            Internal::IEqualsAscii(input, "yes") ||
+            Internal::IEqualsAscii(input, "on") ||
+            Internal::IEqualsAscii(input, "enabled"))
             return true;
 
         if (input == "0" ||
-            detail::IEqualsAscii(input, "no") ||
-            detail::IEqualsAscii(input, "off") ||
-            detail::IEqualsAscii(input, "disabled"))
+            Internal::IEqualsAscii(input, "no") ||
+            Internal::IEqualsAscii(input, "off") ||
+            Internal::IEqualsAscii(input, "disabled"))
             return false;
 
-        return detail::ParseFailure<bool>("ParseBool", original, "not a boolean");
+        return Internal::ParseFailure<bool>("ParseBool", original, "not a boolean");
     }
     
     export template <class T>
@@ -805,22 +866,22 @@ namespace NK {
                    CaseMode caseMode = CaseMode::InsensitiveAscii) -> Result<E>
     {
         const auto original = input;
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
-            return detail::ParseFailure<E>("ParseEnum", original, "empty input");
+            return Internal::ParseFailure<E>("ParseEnum", original, "empty input");
 
         for (const auto& [name, value] : values) {
             const bool match =
                 caseMode == CaseMode::Sensitive
                     ? input == name
-                    : detail::IEqualsAscii(input, name);
+                    : Internal::IEqualsAscii(input, name);
 
             if (match)
                 return value;
         }
 
-        return detail::ParseFailure<E>("ParseEnum", original, "unknown enum value");
+        return Internal::ParseFailure<E>("ParseEnum", original, "unknown enum value");
     }
     
     export template <class T>
@@ -828,7 +889,7 @@ namespace NK {
     [[nodiscard]]
     auto ParseOptional(std::string_view input) -> Result<std::optional<T>>
     {
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
             return std::optional<T>{};
@@ -848,7 +909,7 @@ namespace NK {
     {
         std::vector<T> result;
 
-        input = detail::TrimAsciiView(input);
+        input = Internal::TrimAsciiView(input);
 
         if (input.empty())
             return result;

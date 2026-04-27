@@ -6,7 +6,7 @@ export module NirnKit.Magic;
 
 namespace NK
 {
-    namespace detail
+    namespace Internal
     {
         using ActiveEffectVisitResult = RE::BSContainer::ForEachResult;
 
@@ -194,7 +194,7 @@ namespace NK
     }
 
     template <class F>
-        requires detail::ActiveEffectCallback<F, RE::ActiveEffect*>
+        requires Internal::ActiveEffectCallback<F, RE::ActiveEffect*>
     struct RawActiveEffectVisitor final : RE::MagicTarget::ForEachActiveEffectVisitor
     {
         explicit RawActiveEffectVisitor(F fn) :
@@ -205,7 +205,7 @@ namespace NK
         auto Accept(RE::ActiveEffect* activeEffect)
             -> RE::BSContainer::ForEachResult override
         {
-            return detail::InvokeActiveEffectCallback(callback, activeEffect);
+            return Internal::InvokeActiveEffectCallback(callback, activeEffect);
         }
 
         F callback;
@@ -215,7 +215,7 @@ namespace NK
     RawActiveEffectVisitor(F) -> RawActiveEffectVisitor<F>;
 
     template <class F>
-        requires detail::ActiveEffectCallback<F, ActiveEffectView>
+        requires Internal::ActiveEffectCallback<F, ActiveEffectView>
     struct ActiveEffectViewVisitor final : RE::MagicTarget::ForEachActiveEffectVisitor
     {
         explicit ActiveEffectViewVisitor(F fn) :
@@ -231,7 +231,7 @@ namespace NK
             if (!view)
                 return RE::BSContainer::ForEachResult::kContinue;
 
-            return detail::InvokeActiveEffectCallback(callback, *view);
+            return Internal::InvokeActiveEffectCallback(callback, *view);
         }
 
         F callback;
@@ -242,8 +242,8 @@ namespace NK
 
     template <class Pred, class F>
         requires
-            detail::EffectPredicate<Pred, ActiveEffectView> &&
-            detail::ActiveEffectCallback<F, ActiveEffectView>
+            Internal::EffectPredicate<Pred, ActiveEffectView> &&
+            Internal::ActiveEffectCallback<F, ActiveEffectView>
     struct FilteredActiveEffectViewVisitor final : RE::MagicTarget::ForEachActiveEffectVisitor
     {
         FilteredActiveEffectViewVisitor(Pred pred, F fn) :
@@ -263,7 +263,7 @@ namespace NK
             if (!std::invoke(predicate, *view))
                 return RE::BSContainer::ForEachResult::kContinue;
 
-            return detail::InvokeActiveEffectCallback(callback, *view);
+            return Internal::InvokeActiveEffectCallback(callback, *view);
         }
 
         Pred predicate;
@@ -274,7 +274,7 @@ namespace NK
     FilteredActiveEffectViewVisitor(Pred, F) -> FilteredActiveEffectViewVisitor<Pred, F>;
 
     export template <class F>
-        requires detail::ActiveEffectCallback<std::decay_t<F>, RE::ActiveEffect*>
+        requires Internal::ActiveEffectCallback<std::decay_t<F>, RE::ActiveEffect*>
     auto VisitActiveEffectsRaw(RE::MagicTarget* target, F&& fn) -> void
     {
         if (!target)
@@ -288,7 +288,7 @@ namespace NK
     }
 
     export template <class F>
-        requires detail::ActiveEffectCallback<std::decay_t<F>, RE::ActiveEffect*>
+        requires Internal::ActiveEffectCallback<std::decay_t<F>, RE::ActiveEffect*>
     auto VisitActiveEffectsRaw(RE::Actor* actor, F&& fn) -> void
     {
         if (!actor)
@@ -298,7 +298,7 @@ namespace NK
     }
 
     export template <class F>
-        requires detail::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
+        requires Internal::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
     auto VisitActiveEffects(RE::MagicTarget* target, F&& fn) -> void
     {
         if (!target)
@@ -312,7 +312,7 @@ namespace NK
     }
 
     export template <class F>
-        requires detail::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
+        requires Internal::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
     auto VisitActiveEffects(RE::Actor* actor, F&& fn) -> void
     {
         if (!actor)
@@ -323,8 +323,8 @@ namespace NK
 
     export template <class Pred, class F>
         requires
-            detail::EffectPredicate<std::decay_t<Pred>, ActiveEffectView> &&
-            detail::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
+            Internal::EffectPredicate<std::decay_t<Pred>, ActiveEffectView> &&
+            Internal::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
     auto VisitActiveEffectsWhere(RE::MagicTarget* target, Pred&& pred, F&& fn) -> void
     {
         if (!target)
@@ -343,8 +343,8 @@ namespace NK
 
     export template <class Pred, class F>
         requires
-            detail::EffectPredicate<std::decay_t<Pred>, ActiveEffectView> &&
-            detail::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
+            Internal::EffectPredicate<std::decay_t<Pred>, ActiveEffectView> &&
+            Internal::ActiveEffectCallback<std::decay_t<F>, ActiveEffectView>
     auto VisitActiveEffectsWhere(RE::Actor* actor, Pred&& pred, F&& fn) -> void
     {
         if (!actor)
@@ -365,6 +365,23 @@ namespace NK
     export inline auto ValidateActiveEffectData(const RE::ActiveEffect* activeEffect) -> bool
     {
         return activeEffect && ValidateEffectData(activeEffect->effect);
+    }
+    
+    export auto TargetHasEffectWithKeyword(RE::MagicTarget* target, const RE::BGSKeyword* keyword)
+    {
+        auto result = false;
+        
+        VisitActiveEffects(target, [&result, keyword](ActiveEffectView view)
+        {
+            if (view.HasKeyword(keyword))
+            {
+                result = true;
+                return RE::BSContainer::ForEachResult::kStop;
+            }
+            return RE::BSContainer::ForEachResult::kContinue;
+        });
+        
+        return result;
     }
     
 }
