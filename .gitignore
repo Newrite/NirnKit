@@ -1,4 +1,3 @@
-xmake.kit.lua
 xmake-requires.lock
 build
 .xmake
