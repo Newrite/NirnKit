@@ -1,0 +1,7 @@
+xmake.kit.lua
+xmake-requires.lock
+build
+.xmake
+.idea
+.vs
+vsxmake2026
