@@ -1,5 +1,5 @@
 -- include commonlib
-includes(os.getenv("CommonLibSSE_NG"))
+includes(os.getenv("CommonLibSSE-NG"))
 
 -- set configs
 set_config("skyrim_vr", true)
