@@ -1,11 +1,13 @@
 module;
 
 #include "Prelude.hpp"
+#include <expected>
 
 export module NirnKit.STLExtension;
 
 namespace NK {
     
+    // String helpers
     export auto Trim(std::string_view str) -> std::string
     {
         constexpr std::string_view whitespace = " \t\r\n";
@@ -52,10 +54,73 @@ namespace NK {
         return str;
     }
     
+    export template <std::ranges::input_range R>
+        requires std::constructible_from<std::string_view, std::ranges::range_reference_t<R>>
+    auto Join(R&& parts, std::string_view separator) -> std::string
+    {
+        std::string result;
+        bool first = true;
+
+        for (auto&& part : parts) {
+            if (!first)
+                result += separator;
+
+            first = false;
+            result += std::string_view{part};
+        }
+
+        return result;
+    }
+    
+    export auto ReplaceAll(std::string_view source,
+                           std::string_view from,
+                           std::string_view to) -> std::string
+    {
+        if (from.empty()) return "";
+
+        std::string result;
+        size_t pos = 0;
+
+        while (true) {
+            const size_t next = source.find(from, pos);
+
+            if (next == std::string_view::npos) {
+                result += source.substr(pos);
+                break;
+            }
+
+            result += source.substr(pos, next - pos);
+            result += to;
+            pos = next + from.size();
+        }
+
+        return result;
+    }
+    
+    
+    // STL containers helpers
+    template <std::ranges::input_range R>
+    [[nodiscard]]
+    auto ToVector(R&& range)
+    {
+        using T = std::ranges::range_value_t<R>;
+
+        return std::forward<R>(range)
+            | std::ranges::to<std::vector<T>>();
+    }
+
+    template <class T, std::ranges::input_range R>
+    [[nodiscard]]
+    auto ToVector(R&& range) -> std::vector<T>
+    {
+        return std::forward<R>(range)
+            | std::ranges::to<std::vector<T>>();
+    }
+    
     export template <std::ranges::input_range R, class T>
     auto Contains(R&& range, const T& value) -> bool
     {
-        return std::ranges::find(range, value) != std::ranges::end(range);
+        return std::ranges::contains(range, value);
     }
     
     export template <std::ranges::input_range R, class T>
@@ -123,6 +188,28 @@ namespace NK {
             return nullptr;
 
         return std::addressof(*it);
+    }
+    
+    export template <class Map, class Key>
+    auto FindValuePtr(Map& map, const Key& key) -> typename Map::mapped_type*
+    {
+        auto it = map.find(key);
+
+        if (it == map.end())
+            return nullptr;
+
+        return std::addressof(it->second);
+    }
+
+    export template <class Map, class Key>
+    auto FindValuePtr(const Map& map, const Key& key) -> const typename Map::mapped_type*
+    {
+        auto it = map.find(key);
+
+        if (it == map.end())
+            return nullptr;
+
+        return std::addressof(it->second);
     }
     
     export template <class T, class Alloc, class U>
@@ -194,18 +281,6 @@ namespace NK {
 
         v.emplace_back(std::forward<U>(value));
         return true;
-    }
-    
-    export template <class T, class Alloc, std::ranges::input_range R>
-    auto Append(std::vector<T, Alloc>& dst, R&& src) -> void
-    {
-        if constexpr (std::ranges::sized_range<R>) {
-            dst.reserve(dst.size() + std::ranges::size(src));
-        }
-
-        for (auto&& item : src) {
-            dst.emplace_back(std::forward<decltype(item)>(item));
-        }
     }
     
     export template <class T, class Alloc>
@@ -294,6 +369,17 @@ namespace NK {
         return it->second;
     }
     
+    export template <class Map, class Key, class... Args>
+    auto GetOrEmplace(Map& map, Key&& key, Args&&... args) -> typename Map::mapped_type&
+    {
+        auto [it, inserted] = map.try_emplace(
+            std::forward<Key>(key),
+            std::forward<Args>(args)...
+        );
+
+        return it->second;
+    }
+    
     export template <std::ranges::input_range R, class T, class Proj>
     auto FindBy(R&& range, const T& value, Proj proj)
     {
@@ -304,6 +390,493 @@ namespace NK {
     auto ContainsBy(R&& range, const T& value, Proj proj) -> bool
     {
         return std::ranges::find(range, value, proj) != std::ranges::end(range);
+    }
+    
+    export template <class T, class Alloc, class Pred>
+    auto TakeFirstIf(std::vector<T, Alloc>& v, Pred pred) -> std::optional<T>
+    {
+        auto it = std::ranges::find_if(v, pred);
+
+        if (it == v.end())
+            return std::nullopt;
+
+        T value = std::move(*it);
+        v.erase(it);
+        return value;
+    }
+    
+    export template <class T, class Alloc, class Pred>
+    auto EraseUnstableIf(std::vector<T, Alloc>& v, Pred pred) -> size_t
+    {
+        size_t removed = 0;
+
+        for (size_t i = 0; i < v.size();) {
+            if (std::invoke(pred, v[i])) {
+                if (i + 1 != v.size())
+                    v[i] = std::move(v.back());
+
+                v.pop_back();
+                ++removed;
+            } else {
+                ++i;
+            }
+        }
+
+        return removed;
+    }
+    
+    
+    
+    // New types
+    struct Error
+    {
+        std::string message;
+    };
+
+    export template <class T>
+    using Result = std::expected<T, Error>;
+
+    export using VoidResult = std::expected<void, Error>;
+    
+    
+    export template <class F>
+    class ScopeExit
+    {
+    public:
+        template <class Fn>
+            requires std::constructible_from<F, Fn>
+        explicit ScopeExit(Fn&& fn)
+            noexcept(std::is_nothrow_constructible_v<F, Fn>)
+            : fn_(std::forward<Fn>(fn))
+        {
+        }
+
+        ScopeExit(ScopeExit&& other)
+            noexcept(std::is_nothrow_move_constructible_v<F>)
+            : fn_(std::move(other.fn_)),
+              active_(std::exchange(other.active_, false))
+        {
+        }
+
+        ScopeExit(const ScopeExit&) = delete;
+        auto operator=(const ScopeExit&) -> ScopeExit& = delete;
+        auto operator=(ScopeExit&&) -> ScopeExit& = delete;
+
+        ~ScopeExit() noexcept
+        {
+            if (active_)
+                fn_();
+        }
+
+        auto Release() noexcept -> void
+        {
+            active_ = false;
+        }
+
+    private:
+        F fn_;
+        bool active_ = true;
+    };
+
+    template <class F>
+    ScopeExit(F) -> ScopeExit<F>;
+    
+    
+    // Overloaded for std::visit
+    export template <class... Ts>
+    struct Overloaded : Ts...
+    {
+        using Ts::operator()...;
+    };
+
+    template <class... Ts>
+    Overloaded(Ts...) -> Overloaded<Ts...>;
+    
+    
+    // opt in bitmask for enum classes
+    /*
+    enum class ActorFlags : uint32_t
+    {
+        None   = 0,
+        Dead   = 1 << 0,
+        Hidden = 1 << 1,
+        Loaded = 1 << 2,
+    };
+    
+    template <>
+    inline constexpr bool EnableBitmaskOperators<ActorFlags> = true; 
+     */
+    export template <class E>
+    inline constexpr bool EnableBitmaskOperators = false;
+
+    export template <class E>
+    concept BitmaskEnum =
+        std::is_enum_v<E> && EnableBitmaskOperators<E>;
+
+    export template <BitmaskEnum E>
+    constexpr auto operator|(E lhs, E rhs) noexcept -> E
+    {
+        using U = std::underlying_type_t<E>;
+        return static_cast<E>(static_cast<U>(lhs) | static_cast<U>(rhs));
+    }
+
+    export template <BitmaskEnum E>
+    constexpr auto operator&(E lhs, E rhs) noexcept -> E
+    {
+        using U = std::underlying_type_t<E>;
+        return static_cast<E>(static_cast<U>(lhs) & static_cast<U>(rhs));
+    }
+
+    export template <BitmaskEnum E>
+    constexpr auto HasFlag(E value, E flag) noexcept -> bool
+    {
+        using U = std::underlying_type_t<E>;
+        return (static_cast<U>(value) & static_cast<U>(flag)) == static_cast<U>(flag);
+    }
+    
+    
+    export template <std::integral T>
+    constexpr auto ToBigEndian(T value) noexcept -> T
+    {
+        if constexpr (std::endian::native == std::endian::big) {
+            return value;
+        } else {
+            return std::byteswap(value);
+        }
+    }
+
+    export template <std::integral T>
+    constexpr auto FromBigEndian(T value) noexcept -> T
+    {
+        return ToBigEndian(value);
+    }
+    
+    namespace detail
+    {
+        [[nodiscard]]
+        constexpr auto IsAsciiSpace(char c) noexcept -> bool
+        {
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+        }
+
+        [[nodiscard]]
+        constexpr auto TrimAsciiView(std::string_view s) noexcept -> std::string_view
+        {
+            while (!s.empty() && IsAsciiSpace(s.front()))
+                s.remove_prefix(1);
+
+            while (!s.empty() && IsAsciiSpace(s.back()))
+                s.remove_suffix(1);
+
+            return s;
+        }
+
+        [[nodiscard]]
+        constexpr auto ToLowerAscii(char c) noexcept -> char
+        {
+            if (c >= 'A' && c <= 'Z')
+                return static_cast<char>(c - 'A' + 'a');
+
+            return c;
+        }
+
+        [[nodiscard]]
+        constexpr auto IEqualsAscii(std::string_view a, std::string_view b) noexcept -> bool
+        {
+            if (a.size() != b.size())
+                return false;
+
+            for (size_t i = 0; i < a.size(); ++i) {
+                if (ToLowerAscii(a[i]) != ToLowerAscii(b[i]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [[nodiscard]]
+        inline auto MakeParseError(std::string_view function,
+                                   std::string_view input,
+                                   std::string_view reason) -> Error
+        {
+            std::string message;
+            message += function;
+            message += ": ";
+            message += reason;
+            message += " [input: `";
+            message += input;
+            message += "`]";
+
+            return Error{std::move(message)};
+        }
+
+        template <class T>
+        [[nodiscard]]
+        auto ParseFailure(std::string_view function,
+                          std::string_view input,
+                          std::string_view reason) -> Result<T>
+        {
+            return std::unexpected(MakeParseError(function, input, reason));
+        }
+    }
+
+    export template <class T>
+    concept ParseInteger =
+        std::integral<T> &&
+        !std::same_as<std::remove_cv_t<T>, bool>;
+
+    export template <ParseInteger T>
+    [[nodiscard]]
+    auto ParseIntegral(std::string_view input, int base = 10) -> Result<T>
+    {
+        const auto original = input;
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return detail::ParseFailure<T>("ParseIntegral", original, "empty input");
+
+        if (base < 2 || base > 36)
+            return detail::ParseFailure<T>("ParseIntegral", original, "base must be in [2, 36]");
+
+        T value{};
+
+        const char* first = input.data();
+        const char* last = input.data() + input.size();
+
+        const auto [ptr, ec] = std::from_chars(first, last, value, base);
+
+        if (ec == std::errc::invalid_argument)
+            return detail::ParseFailure<T>("ParseIntegral", original, "not an integer");
+
+        if (ec == std::errc::result_out_of_range)
+            return detail::ParseFailure<T>("ParseIntegral", original, "integer out of range");
+
+        if (ec != std::errc{})
+            return detail::ParseFailure<T>("ParseIntegral", original, "integer parse failed");
+
+        if (ptr != last)
+            return detail::ParseFailure<T>("ParseIntegral", original, "trailing characters");
+
+        return value;
+    }
+
+    export template <std::signed_integral T = int64_t>
+    [[nodiscard]]
+    auto ParseInt(std::string_view input, int base = 10) -> Result<T>
+    {
+        return ParseIntegral<T>(input, base);
+    }
+
+    export template <std::unsigned_integral T = uint64_t>
+    [[nodiscard]]
+    auto ParseUInt(std::string_view input, int base = 10) -> Result<T>
+    {
+        return ParseIntegral<T>(input, base);
+    }
+
+    export template <std::floating_point T>
+    [[nodiscard]]
+    auto ParseFloating(std::string_view input,
+                       std::chars_format format = std::chars_format::general) -> Result<T>
+    {
+        const auto original = input;
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return detail::ParseFailure<T>("ParseFloating", original, "empty input");
+
+        T value{};
+
+        const char* first = input.data();
+        const char* last = input.data() + input.size();
+
+        const auto [ptr, ec] = std::from_chars(first, last, value, format);
+
+        if (ec == std::errc::invalid_argument)
+            return detail::ParseFailure<T>("ParseFloating", original, "not a floating-point number");
+
+        if (ec == std::errc::result_out_of_range)
+            return detail::ParseFailure<T>("ParseFloating", original, "floating-point value out of range");
+
+        if (ec != std::errc{})
+            return detail::ParseFailure<T>("ParseFloating", original, "floating-point parse failed");
+
+        if (ptr != last)
+            return detail::ParseFailure<T>("ParseFloating", original, "trailing characters");
+
+        return value;
+    }
+
+    export [[nodiscard]]
+    inline auto ParseFloat(std::string_view input) -> Result<float>
+    {
+        return ParseFloating<float>(input);
+    }
+
+    export [[nodiscard]]
+    inline auto ParseDouble(std::string_view input) -> Result<double>
+    {
+        return ParseFloating<double>(input);
+    }
+
+    export [[nodiscard]]
+    inline auto ParseLongDouble(std::string_view input) -> Result<long double>
+    {
+        return ParseFloating<long double>(input);
+    }
+
+    export template <class T>
+        requires ParseInteger<T> || std::floating_point<T>
+    [[nodiscard]]
+    auto ParseNumber(std::string_view input) -> Result<T>
+    {
+        if constexpr (ParseInteger<T>) {
+            return ParseIntegral<T>(input);
+        } else {
+            return ParseFloating<T>(input);
+        }
+    }
+
+    export enum class BoolParseMode
+    {
+        Strict,  // true / false
+        Relaxed  // true / false / 1 / 0 / yes / no / on / off
+    };
+
+    export [[nodiscard]]
+    inline auto ParseBool(std::string_view input,
+                          BoolParseMode mode = BoolParseMode::Relaxed) -> Result<bool>
+    {
+        const auto original = input;
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return detail::ParseFailure<bool>("ParseBool", original, "empty input");
+
+        if (detail::IEqualsAscii(input, "true"))
+            return true;
+
+        if (detail::IEqualsAscii(input, "false"))
+            return false;
+
+        if (mode == BoolParseMode::Strict)
+            return detail::ParseFailure<bool>("ParseBool", original, "expected `true` or `false`");
+
+        if (input == "1" ||
+            detail::IEqualsAscii(input, "yes") ||
+            detail::IEqualsAscii(input, "on") ||
+            detail::IEqualsAscii(input, "enabled"))
+            return true;
+
+        if (input == "0" ||
+            detail::IEqualsAscii(input, "no") ||
+            detail::IEqualsAscii(input, "off") ||
+            detail::IEqualsAscii(input, "disabled"))
+            return false;
+
+        return detail::ParseFailure<bool>("ParseBool", original, "not a boolean");
+    }
+    
+    export template <class T>
+        requires ParseInteger<T> || std::floating_point<T> || std::same_as<T, bool>
+    [[nodiscard]]
+    auto Parse(std::string_view input) -> Result<T>
+    {
+        if constexpr (std::same_as<T, bool>) {
+            return ParseBool(input);
+        } else if constexpr (ParseInteger<T>) {
+            return ParseIntegral<T>(input);
+        } else {
+            return ParseFloating<T>(input);
+        }
+    }
+    
+    export enum class CaseMode
+    {
+        Sensitive,
+        InsensitiveAscii
+    };
+
+    export template <class E>
+        requires std::is_enum_v<E>
+    [[nodiscard]]
+    auto ParseEnum(std::string_view input,
+                   std::initializer_list<std::pair<std::string_view, E>> values,
+                   CaseMode caseMode = CaseMode::InsensitiveAscii) -> Result<E>
+    {
+        const auto original = input;
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return detail::ParseFailure<E>("ParseEnum", original, "empty input");
+
+        for (const auto& [name, value] : values) {
+            const bool match =
+                caseMode == CaseMode::Sensitive
+                    ? input == name
+                    : detail::IEqualsAscii(input, name);
+
+            if (match)
+                return value;
+        }
+
+        return detail::ParseFailure<E>("ParseEnum", original, "unknown enum value");
+    }
+    
+    export template <class T>
+        requires ParseInteger<T> || std::floating_point<T> || std::same_as<T, bool>
+    [[nodiscard]]
+    auto ParseOptional(std::string_view input) -> Result<std::optional<T>>
+    {
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return std::optional<T>{};
+
+        auto parsed = Parse<T>(input);
+
+        if (!parsed)
+            return std::unexpected(parsed.error());
+
+        return std::optional<T>{std::move(*parsed)};
+    }
+    
+    export template <class T>
+        requires ParseInteger<T> || std::floating_point<T> || std::same_as<T, bool>
+    [[nodiscard]]
+    auto ParseList(std::string_view input, char delimiter = ',') -> Result<std::vector<T>>
+    {
+        std::vector<T> result;
+
+        input = detail::TrimAsciiView(input);
+
+        if (input.empty())
+            return result;
+
+        size_t pos = 0;
+
+        while (true) {
+            const size_t next = input.find(delimiter, pos);
+
+            const std::string_view part =
+                next == std::string_view::npos
+                    ? input.substr(pos)
+                    : input.substr(pos, next - pos);
+
+            auto parsed = Parse<T>(part);
+
+            if (!parsed)
+                return std::unexpected(parsed.error());
+
+            result.emplace_back(std::move(*parsed));
+
+            if (next == std::string_view::npos)
+                break;
+
+            pos = next + 1;
+        }
+
+        return result;
     }
     
 }
