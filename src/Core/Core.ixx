@@ -32,7 +32,7 @@ namespace NK {
       return false;
   }
 
-  export auto is_any_menu_open() -> bool
+  export auto IsAnyMenuOpen() -> bool
   {
     const auto ui = RE::UI::GetSingleton();
     const auto player = RE::PlayerCharacter::GetSingleton();
