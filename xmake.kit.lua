@@ -1,5 +1,6 @@
 -- include commonlib
-includes(os.getenv("CommonLibSSE-NG"))
+includes("lib/IXXExtension")
+includes("lib/CommonLibVR")
 
 -- set configs
 set_config("skyrim_vr", true)

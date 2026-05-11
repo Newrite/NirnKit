@@ -14,10 +14,10 @@ if is_standalone then
 
     add_rules("mode.debug", "mode.releasedbg")
     add_rules("plugin.vsxmake.autoupdate")
+else
+    add_repositories("newrite-repo https://github.com/Newrite/IXXExtension.git")
+    add_requires("ixxextension master", { system = false })
 end
-
--- set policies
-
 
 local function add_module_interface_files(dir)
     local ixx_files = os.files(path.join(dir, "**.ixx"))
@@ -68,14 +68,18 @@ target("NirnKit")
     set_default(is_standalone)
 
     set_arch("x64")
-    set_languages("c++latest")
+    set_languages("c++23")
     set_warnings("allextra")
 
     set_policy("build.c++.modules", true)
     set_policy("check.auto_ignore_flags", false)
 
-    -- add dependencies to target
+    if is_standalone then
+        add_deps("IXXExtension", { public = true })
+    else
+        add_packages("ixxextension", { public = true })
+    end
+
     add_deps("commonlibsse-ng")
 
-    -- add src files
     add_all_sources("src")

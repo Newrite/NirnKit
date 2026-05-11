@@ -5,7 +5,7 @@
 
 export module NirnKit.Core;
 
-import NirnKit.STLExtension;
+import IXXExtension;
 
 namespace NK
 {
@@ -17,9 +17,9 @@ namespace NK
         
         template <class T>
         [[nodiscard]]
-        auto ResolveFailure(std::string_view input, std::string_view reason) -> Result<T>
+        auto ResolveFailure(std::string_view input, std::string_view reason) -> ixx::Result<T>
         {
-            return Internal::ParseFailure<T>("ResolveForm", input, reason);
+            return ixx::Internal::ParseFailure<T>("ResolveForm", input, reason);
         }
 
         [[nodiscard]]
@@ -29,13 +29,13 @@ namespace NK
                 return false;
 
             text.remove_prefix(text.size() - suffix.size());
-            return Internal::IEqualsAscii(text, suffix);
+            return ixx::Internal::IEqualsAscii(text, suffix);
         }
 
         [[nodiscard]]
         constexpr auto LooksLikePluginName(std::string_view text) noexcept -> bool
         {
-            text = Internal::TrimAsciiView(text);
+            text = ixx::Internal::TrimAsciiView(text);
 
             return IEndsWithAscii(text, ".esp") ||
                 IEndsWithAscii(text, ".esm") ||
@@ -64,10 +64,10 @@ namespace NK
         };
 
         [[nodiscard]]
-        auto SplitFormSpec(std::string_view input) -> Result<FormSpecParts>
+        auto SplitFormSpec(std::string_view input) -> ixx::Result<FormSpecParts>
         {
             const auto original = input;
-            input = Internal::TrimAsciiView(input);
+            input = ixx::Internal::TrimAsciiView(input);
 
             if (input.empty())
                 return ResolveFailure<FormSpecParts>(original, "empty form spec");
@@ -85,8 +85,8 @@ namespace NK
             const char delimiter = tildeCount == 1 ? '~' : '|';
             const size_t delimiterPos = input.find(delimiter);
 
-            auto left = Internal::TrimAsciiView(input.substr(0, delimiterPos));
-            auto right = Internal::TrimAsciiView(input.substr(delimiterPos + 1));
+            auto left = ixx::Internal::TrimAsciiView(input.substr(0, delimiterPos));
+            auto right = ixx::Internal::TrimAsciiView(input.substr(delimiterPos + 1));
 
             if (left.empty() || right.empty())
                 return ResolveFailure<FormSpecParts>(original, "form spec contains empty part");
@@ -111,7 +111,7 @@ namespace NK
 
         template <FormIDInteger T>
         [[nodiscard]]
-        auto NormalizeLocalFormID(T value) -> Result<RE::FormID>
+        auto NormalizeLocalFormID(T value) -> ixx::Result<RE::FormID>
         {
             using CleanT = std::remove_cvref_t<T>;
 
@@ -153,10 +153,10 @@ namespace NK
         }
 
         [[nodiscard]]
-        auto ParseLocalFormID(std::string_view input) -> Result<RE::FormID>
+        auto ParseLocalFormID(std::string_view input) -> ixx::Result<RE::FormID>
         {
             const auto original = input;
-            input = Internal::TrimAsciiView(input);
+            input = ixx::Internal::TrimAsciiView(input);
 
             if (input.empty())
                 return ResolveFailure<RE::FormID>(original, "empty FormID");
@@ -174,7 +174,7 @@ namespace NK
 
             if (StartsWithHexPrefix(input))
             {
-                auto parsed = ParseHex<RE::FormID>(input);
+                auto parsed = ixx::ParseHex<RE::FormID>(input);
 
                 if (!parsed)
                     return ResolveFailure<RE::FormID>(original, "invalid hex FormID");
@@ -187,14 +187,14 @@ namespace NK
             //   "0x84D"  -> hex 0x84D, also decimal 2125
             //   "84D"    -> bare hex because it contains A-F letters
             //   "800"    -> decimal 800; write "0x800" for hex 0x800.
-            auto decimal = ParseUInt<RE::FormID>(input, 10);
+            auto decimal = ixx::ParseUInt<RE::FormID>(input, 10);
 
             if (decimal)
                 return *decimal;
 
             if (ContainsHexLetter(input))
             {
-                auto hex = ParseHex<RE::FormID>(input);
+                auto hex = ixx::ParseHex<RE::FormID>(input);
 
                 if (hex)
                     return *hex;
@@ -204,7 +204,7 @@ namespace NK
         }
 
         [[nodiscard]]
-        auto ParseFormSpec(std::string_view input) -> Result<ParsedFormSpec>
+        auto ParseFormSpec(std::string_view input) -> ixx::Result<ParsedFormSpec>
         {
             const auto original = input;
 
@@ -362,10 +362,10 @@ namespace NK
     }
 
     export [[nodiscard]]
-    auto ResolveForm(RE::FormID localFormID, std::string_view modName) -> Result<RE::TESForm*>
+    auto ResolveForm(RE::FormID localFormID, std::string_view modName) -> ixx::Result<RE::TESForm*>
     {
         const auto originalModName = modName;
-        modName = Internal::TrimAsciiView(modName);
+        modName = ixx::Internal::TrimAsciiView(modName);
 
         if (modName.empty())
             return detail::ResolveFailure<RE::TESForm*>(originalModName, "empty mod name");
@@ -387,7 +387,7 @@ namespace NK
     }
 
     export [[nodiscard]]
-    auto ResolveForm(std::string_view formIDText, std::string_view modName) -> Result<RE::TESForm*>
+    auto ResolveForm(std::string_view formIDText, std::string_view modName) -> ixx::Result<RE::TESForm*>
     {
         auto localFormID = detail::ParseLocalFormID(formIDText);
 
@@ -399,7 +399,7 @@ namespace NK
 
     export template <detail::FormIDInteger T>
     [[nodiscard]]
-    auto ResolveForm(T localFormID, std::string_view modName) -> Result<RE::TESForm*>
+    auto ResolveForm(T localFormID, std::string_view modName) -> ixx::Result<RE::TESForm*>
     {
         auto normalized = detail::NormalizeLocalFormID(localFormID);
 
@@ -411,7 +411,7 @@ namespace NK
 
 
     export [[nodiscard]]
-    auto ResolveForm(std::string_view formSpec) -> Result<RE::TESForm*>
+    auto ResolveForm(std::string_view formSpec) -> ixx::Result<RE::TESForm*>
     {
         auto parsed = detail::ParseFormSpec(formSpec);
 
@@ -424,7 +424,7 @@ namespace NK
     export template <class T>
         requires std::derived_from<T, RE::TESForm>
     [[nodiscard]]
-    auto ResolveFormAs(std::string_view formSpec) -> Result<T*>
+    auto ResolveFormAs(std::string_view formSpec) -> ixx::Result<T*>
     {
         auto form = ResolveForm(formSpec);
 
@@ -442,7 +442,7 @@ namespace NK
     export template <class T>
         requires std::derived_from<T, RE::TESForm>
     [[nodiscard]]
-    auto ResolveFormAs(std::string_view formIDText, std::string_view modName) -> Result<T*>
+    auto ResolveFormAs(std::string_view formIDText, std::string_view modName) -> ixx::Result<T*>
     {
         auto form = ResolveForm(formIDText, modName);
 
@@ -460,7 +460,7 @@ namespace NK
     export template <class T, detail::FormIDInteger ID>
         requires std::derived_from<T, RE::TESForm>
     [[nodiscard]]
-    auto ResolveFormAs(ID localFormID, std::string_view modName) -> Result<T*>
+    auto ResolveFormAs(ID localFormID, std::string_view modName) -> ixx::Result<T*>
     {
         auto form = ResolveForm(localFormID, modName);
 
